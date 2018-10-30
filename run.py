@@ -6,18 +6,28 @@ import os
 import json
 import sys
 import re
+import pymongo
 
 
-thread_lock = threading.BoundedSemaphore(value=10)
+thread_lock = threading.BoundedSemaphore(value=15)
 
 
-def get_cover_and_album_url(raw_page_url, headers, cover_url_list, album_url_list):
+def get_cover_and_album_url(raw_page_url, headers, cover_info, album_info):
     raw_index_html = requests.get(raw_page_url, headers=headers)
     # 处理一下源码
     raw_index_html.encoding = 'utf-8'
     index_html = etree.HTML(raw_index_html.text)
-    cover_url_list += index_html.xpath('//div[@class="place-padding"]//figure//img/@data-original') # 这里可能没有匹配到
-    album_url_list += index_html.xpath('//div[@class="place-padding"]//figure/a/@href') 
+    cover_url_list = index_html.xpath('//div[@class="place-padding"]//figure//img/@data-original') # 这里可能没有匹配到
+    album_url_list = index_html.xpath('//div[@class="place-padding"]//figure/a/@href') 
+    temp_dic_list = []
+    for cover in cover_url_list:
+        temp_dic_list.append({'cover_url': cover})
+    i = 0
+    for album in album_url_list:
+        temp_dic_list[i]['referer'] = album
+        album_info.insert({'album_url': album})
+        i += 1
+    cover_info.insert(temp_dic_list)
     thread_lock.release()  # 解锁
 
 
@@ -46,7 +56,7 @@ def write(path, text):
     dic = {'content': text}
     with open(path, 'a') as f:
         json.dump(dic, f, ensure_ascii=False)
-        # f.write('\n')
+        f.write('\n')
 
 
 # 读取文档
@@ -57,12 +67,11 @@ def read(path):
 
 
 def get_cover_and_album_main():
+    connection = pymongo.MongoClient()  # 第一个参数主机, 第二个参数端口
+    Mei_zi_spider_db = connection.Mei_zi_spider  # 新建数据库
+    cover_info = Mei_zi_spider_db.cover_url  # 新建数据表
+    album_info = Mei_zi_spider_db.album_url  # 新建数据表
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/22.0.1207.1 Safari/537.1'}
-    # //a/text()
-    # //a/[@href="xxxxxx"]/text()
-    # //li/a//@href
-    cover_url_list = []
-    album_url_list = []
     raw_page_url = ''
     threads = []
     try:
@@ -71,7 +80,7 @@ def get_cover_and_album_main():
                 raw_page_url = 'http://m.mzitu.com/'
             else:
                 raw_page_url = 'http://m.mzitu.com/page/{}/'.format(i+1)
-            t = threading.Thread(target=get_cover_and_album_url, args=(raw_page_url, headers, cover_url_list, album_url_list))
+            t = threading.Thread(target=get_cover_and_album_url, args=(raw_page_url, headers, cover_info, album_info))
             threads.append(t)
         # 开始跑线程
         for s in threads:
@@ -82,16 +91,8 @@ def get_cover_and_album_main():
         # 等待所有线程
         for e in threads:
             e.join()
-        # 保存封面链接
-        write('json/cover_url_list.json', cover_url_list)
-        # 保存相册链接
-        write('json/album_url_list.json', album_url_list)
     except:
         print('该链接寻找失败', raw_page_url)
-        # 保存封面链接
-        write('json/cover_url_list.json', cover_url_list)
-        # 保存相册链接
-        write('json/album_url_list.json', album_url_list)
 
 
 def get_pic_url_main():
@@ -122,5 +123,7 @@ def get_pic_url_main():
 
 
 if __name__ == '__main__':
-    main()
+    # get_cover_and_album_main()  # 先运行这个,然后注释掉
+    # get_pic_url_main()  # 然后运行这行, 运行完后注释
+    # main()
 
